@@ -26,7 +26,7 @@ ipaddrs = string.format("%02x%02x:%02x%02x:%02x%02x:%02x%02x::%02x%02x:%02x%02x:
 
 print("ip addr", ipaddrs)
 print("node id", storm.os.nodeid())
-cport = 70001
+cport = 50001
 
 -- create client socket
 csock = storm.net.udpsocket(cport, 
