@@ -125,7 +125,7 @@ cord.new( function()
         serv_type = "staff"
      end
 
-     for i = 1, student_service_count - 1 do
+     for i = 1, service_count - 1 do
 	if (service_table[i].service_type == serv_type) then
 		print(i..". "..service_table[i].desc.."\n")
 	end
@@ -140,13 +140,13 @@ cord.new( function()
      			service_msg.name = service_table[service_choice].name
 			service_msg.args = {lcd_message}
 			local service_msg_payload = storm.mp.pack(service_msg)
-                	service_invoke = storm.os.invokePeriodically(1*storm.os.SECOND, function () storm.net.sendto(ssock_service,  							service_msg_payload, student_service_table[service_choice].from, sport_send) end)    
+                	service_invoke = storm.os.invokePeriodically(1*storm.os.SECOND, function () storm.net.sendto(ssock_service,  							service_msg_payload, service_table[service_choice].from, sport_send) end)    
      elseif  (service_table[service_choice].s == "subscribeToTemp") then
 			local service_msg = {}
      			service_msg.name = service_table[service_choice].name
 			service_msg.args = {}
 			local service_msg_payload = storm.mp.pack(service_msg)
-                	service_invoke = storm.os.invokePeriodically(1*storm.os.SECOND, function () storm.net.sendto(ssock_service,  							service_msg_payload, student_service_table[service_choice].from, sport_send) end)   
+                	service_invoke = storm.os.invokePeriodically(1*storm.os.SECOND, function () storm.net.sendto(ssock_service,  							service_msg_payload, service_table[service_choice].from, sport_send) end)   
     end
   end)
 end
