@@ -14,9 +14,14 @@ ipaddrs = string.format("%02x%02x:%02x%02x:%02x%02x:%02x%02x::%02x%02x:%02x%02x:
 
 print("ip addr\n", ipaddrs)
 
-local service_messages = {
-    servTemp = {s = "subscribeToTemp", desc = "temp", service_type = {"prof"} },
-}
+setLights = {s = "setLed", desc = "A_led", service_type = {"student", "prof", "staff"} }
+
+local led = storm.io.D4
+storm.io.set_mode(storm.io.OUTPUT, led)
+
+function set_led(value)
+    storm.io.set(value,led)
+end
 
 local is_master = true
 local previous_master = false
@@ -24,6 +29,7 @@ local previous_master = false
 local enable_switch = true
 
 service_node_table = {}
+client_node_table = {}
 recv_ack = {}
 switch_master_handle = {}
 switch_ack = {}
@@ -83,68 +89,83 @@ master = function()
 						msg_ack.desc = "NEW_SERVICE_ACK"
 						local payload_ack = storm.mp.pack(msg_ack)
 						storm.net.sendto(msock, payload_ack, from, service_node_listen_port)
+
+						for client_id, value in pairs(client_node_table) do
+							local msg_service = {}
+							msg_service.id = my_id
+							msg_service.desc = "NEW_CLIENT_REQUEST"
+							msg_service.client_type = msg.client_type
+							msg_service.client_ip = value
+							local payload_service = storm.mp.pack(msg_service)
+							recv_ack[from] = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(msock,payload_service, from, service_node_listen_port) end) 
+						end
 					elseif (msg.desc == "NEW_CLIENT") then
-						for curr_id, curr_node in pairs(service_node_table) do
-							if (curr_id ~= my_id) then
-								if (curr_node[msg.client_table] ~= nil) then
-									local msg_service = {}
-									msg_service.id = my_id
-									msg_service.desc = "NEW_CLIENT_REQUEST"
-									msg_service.client_type = msg.client_type
-									msg_service.client_ip = from
-									local payload_service = storm.mp.pack(msg_service)
-									recv_ack[curr_node.from] = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(msock,payload_service, curr_node.from, service_node_listen_port) end) 
+						if (client_node_table[msg.id] == nil) then
+							client_node_table[msg.id] = from
+							for curr_id, curr_node in pairs(service_node_table) do
+								if (curr_id ~= my_id) then
+									if (curr_node[msg.client_table] ~= nil) then
+										local msg_service = {}
+										msg_service.id = my_id
+										msg_service.desc = "NEW_CLIENT_REQUEST"
+										msg_service.client_type = msg.client_type
+										msg_service.client_ip = from
+										local payload_service = storm.mp.pack(msg_service)
+										recv_ack[curr_node.from] = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(msock,payload_service, curr_node.from, service_node_listen_port) end) 
+									end
 								end
 							end
-						end
-						local msg_client = {}	
-						msg_client.id=my_id
-						msg_client.desc = "SERVICE"
-						msg_client.service = {name = "servTemp", s = "subscribeToTemp", desc = "temp"}
-						msg_client.master = true
-						local payload_client = storm.mp.pack(msg_client)
-						client_ack_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(msock,payload_client, from, client_port) end) 
+							local msg_reg_ack = {}
+							msg_reg_ack.id = my_id
+							msg_reg_ack.desc = "REG_ACK"
+							local payload_reg_ack = storm.mp.pack(msg_reg_ack)
+							--print ("RECV NEW CLIENT FIRST TIME")
+							storm.net.sendto(msock,payload_reg_ack,from,client_port)
+
+							local msg_client = {}	
+							msg_client.id=my_id
+							msg_client.desc = "SERVICE"
+							msg_client.setLights = setLights
+							local payload_client = storm.mp.pack(msg_client)
+							client_ack_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(msock,payload_client, from, client_port) end)
+						else
+							local msg_reg_ack = {}
+							msg_reg_ack.id = my_id
+							msg_reg_ack.desc = "REG_ACK"
+							local payload_reg_ack = storm.mp.pack(msg_reg_ack)
+							--print ("RECV NEW CLIENT SECOND TIME")
+							storm.net.sendto(msock,payload_reg_ack,from,client_port)
+						end	 
 					end
 					
 				end
 			       end)
 end
 
---this socket just maskes sure the master's recieves the new service node's ack
-recv_service_ack = function()
-	rssock = storm.net.udpsocket(service_node_ack_listen_port, 
-			       function(payload, from, port)
-					if (recv_ack[from] ~= nil) then
-						storm.os.cancel(recv_ack[from])
-					end
-				end)
-end
 
 --client and service node comm
 client_comm = function()
 	rcasock = storm.net.udpsocket(client_port_ack, 
 			       function(payload, from, port)
 					local msg = storm.mp.unpack(payload)
-					if (msg.desc == "RECV_SERVICE") then
+					if (msg.desc == "SERVICE_ACK") then
+						--print("RECVIEVED SERVICE ACK")
 						storm.os.cancel(client_ack_handle)
 					elseif(msg.desc == "INVOKE_SERVICE") then
+						--print("RECVIEVED INVOKE_SERVICE REQUEST "..payload)
+						set_led(tonumber(msg.args[1]))
 						local msg_client = {}
 						msg_client.id = my_id
 						msg_client.desc = "INVOKE_SERVICE_ACK"
 						msg_client.payload = "SUCCESS"
-						local payload_client = storm.mp.pack(msg_client_payload)
-						client_invoke_service_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(rcasock,payload_client, from, client_port) end)
-					elseif(msg.desc == "INVOKE_SERVICE_ACK") then
-						if (client_invoke_service_handle ~= nil) then
-							storm.os.cancel(client_invoke_service_handle)
-						end
+						local payload_client = storm.mp.pack(msg_client)
+						storm.net.sendto(rcasock,payload_client, from, client_port) 
 					end
 				end)
 end
 
 
 master()
-recv_service_ack()
 client_comm()
 
 --master and service comm
@@ -153,7 +174,7 @@ mssock = storm.net.udpsocket(service_node_listen_port,
 			       function(payload, from, port)
 					local msg = storm.mp.unpack(payload)
 					if (msg.desc == "NEW_SERVICE_ACK") then
-						print("Receiving new service ack")
+						--print("Receiving new service ack")
 						master_ip = from
 						master_id = msg.id
 						storm.os.cancel(regular_service_handle)
@@ -161,9 +182,15 @@ mssock = storm.net.udpsocket(service_node_listen_port,
 						local msg_client = {}	
 						msg_client.id=my_id
 						msg_client.desc = "SERVICE"
-						msg_client.service = {name = "servTemp", s = "subscribeToTemp", desc = "temp", service_type = msg.client_type }
+						msg_client.service = setLights
 						local payload_client = storm.mp.pack(msg_client)
-						client_ack_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(mssock,payload_client, from, client_port) end) 
+						client_ack_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () storm.net.sendto(mssock,payload_client, msg.client_ip, client_port) end) 
+
+						local msg_master = {}
+						msg_master.id = my_id
+						msg_master.desc = "NEW_CLIENT_REQUEST_ACK"
+						local payload_master = storm.mp.pack(msg_master)
+						storm.net.sendto(mssock,payload_master, from, service_node_listen_port)
 					elseif (msg.desc == "SWITCH_MASTER") then
 						print("RECIEVED PAYLOAD FOR MASTER SWITCH "..msg.service_node_id.."  "..msg.service_node_ip.."\n")
 						if (service_node_table[msg.service_node_id] == nil) then
@@ -226,6 +253,9 @@ mssock = storm.net.udpsocket(service_node_listen_port,
 					elseif (msg.desc == "READY_SWITCH_MASTER_ACK") then
 						print("RECEIVED READY_SWITCH_ACK")
 						storm.os.cancel(switch_handle)
+					elseif (msg.desc == "NEW_CLIENT_REQUEST_ACK") then
+						--print("RECIEVED NEW_CLIENT_REQUEST_ACK")
+						storm.os.cancel(recv_ack[from])
 					end
 				end)
 end
@@ -239,7 +269,7 @@ if (is_master == false) then
 	new_service_message.student = true
 	local new_service_payload = storm.mp.pack(new_service_message)
 	regular_service_handle = storm.os.invokePeriodically(500*storm.os.MILLISECOND, function () 
-								print("Sending new service\n")
+								--print("Sending new service\n")
 								storm.net.sendto(mssock,new_service_payload,"ff02::1", broadcast_listen_port) end)
 
 end
@@ -249,11 +279,11 @@ local switch_ack = {}
 storm.os.invokePeriodically(120*storm.os.SECOND, function () 
 							if (is_master == true and enable_switch == true) then
 								print("Time to Switch Master\n")
-								if (service_node_count >= 2) then
+								if (service_node_count > 2) then
 									enable_switch = false
 									new_master = (my_id + 1) % (service_node_count - 1)
 									for curr_id, curr_node in pairs(service_node_table) do
-										print("LOOK "..curr_id)
+										--print("LOOK "..curr_id)
 										switch_ack[curr_id] = 0
 									end
 									for curr_id, curr_node in pairs(service_node_table) do
